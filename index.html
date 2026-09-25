@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en" data-platform="fluent" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GenPDF Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./src/styles/base.css" />
+    <link rel="stylesheet" href="./src/styles/fluent.css" />
+    <link rel="stylesheet" href="./src/styles/gtk4.css" />
+    <link rel="stylesheet" href="./src/styles/annotations.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="titlebar-region" id="titlebar-container"></header>
+      <nav class="tabs-region" id="tabs-container"></nav>
+      <section class="toolbar-region" id="toolbar-container"></section>
+      <main class="workspace-region">
+        <aside class="sidebar-region" id="sidebar-container"></aside>
+        <section class="viewport-region" id="viewport-container"></section>
+      </main>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

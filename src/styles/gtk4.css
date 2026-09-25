@@ -1,0 +1,305 @@
+/* Linux GNOME GTK 4 / Libadwaita Theme */
+[data-platform="gtk4"] {
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --font-family: Cantarell, "Ubuntu", "Segoe UI", sans-serif;
+  font-family: var(--font-family);
+}
+
+/* Dark Mode Adwaita */
+[data-platform="gtk4"][data-theme="dark"],
+[data-platform="gtk4"] {
+  --app-bg: #242424;
+  --header-bg: #303030;
+  --sidebar-bg: #2a2a2a;
+  --viewport-bg: #1e1e1e;
+  --card-bg: #363636;
+  --footer-bg: #2c2c2c;
+  
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  
+  --text-primary: #ffffff;
+  --text-muted: #9a9996;
+  
+  --control-bg: rgba(255, 255, 255, 0.07);
+  --control-hover: rgba(255, 255, 255, 0.12);
+  --control-active: rgba(255, 255, 255, 0.18);
+  
+  --accent-color: #3584e4; /* Adwaita Blue */
+  --accent-hover: #599bff;
+  --accent-active: #1c71d8;
+  
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  --shadow-canvas: rgba(0, 0, 0, 0.5);
+}
+
+/* Light Mode Adwaita */
+[data-platform="gtk4"][data-theme="light"] {
+  --app-bg: #fafafa;
+  --header-bg: #ebebeb;
+  --sidebar-bg: #f4f4f4;
+  --viewport-bg: #e6e6e6;
+  --card-bg: #ffffff;
+  --footer-bg: #f0f0f0;
+  
+  --border-color: rgba(0, 0, 0, 0.12);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  
+  --text-primary: #2e3436;
+  --text-muted: #77767b;
+  
+  --control-bg: rgba(0, 0, 0, 0.05);
+  --control-hover: rgba(0, 0, 0, 0.09);
+  --control-active: rgba(0, 0, 0, 0.14);
+  
+  --accent-color: #1c71d8;
+  --accent-hover: #3584e4;
+  --accent-active: #1a5fb4;
+  
+  --shadow-color: rgba(0, 0, 0, 0.06);
+  --shadow-canvas: rgba(0, 0, 0, 0.12);
+}
+
+[data-platform="gtk4"] #app {
+  background: var(--app-bg);
+  color: var(--text-primary);
+}
+
+/* GTK 4 HeaderBar Titlebar */
+[data-platform="gtk4"] .titlebar-region {
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+[data-platform="gtk4"] .titlebar-drag-region {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 0 12px;
+  position: relative;
+}
+
+[data-platform="gtk4"] .titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-platform="gtk4"] .app-logo {
+  color: var(--accent-color);
+  display: flex;
+  align-items: center;
+}
+
+[data-platform="gtk4"] .app-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+[data-platform="gtk4"] .titlebar-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* GTK 4 Window Controls (Libadwaita circular close button) */
+[data-platform="gtk4"] .gtk-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+[data-platform="gtk4"] .gtk-controls .win-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: var(--control-bg);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+[data-platform="gtk4"] .gtk-controls .win-btn:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
+}
+
+[data-platform="gtk4"] .gtk-controls .win-close-btn:hover {
+  background: #e01b24 !important;
+  color: #ffffff !important;
+}
+
+/* AdwTabBar (Libadwaita Tabs) */
+[data-platform="gtk4"] .tabs-region {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+[data-platform="gtk4"] .tab-strip-list {
+  display: flex;
+  gap: 6px;
+  height: 100%;
+  align-items: center;
+}
+
+[data-platform="gtk4"] .tab-item {
+  height: 28px;
+  padding: 0 12px;
+  background: var(--control-bg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 220px;
+  transition: all 0.15s ease;
+}
+
+[data-platform="gtk4"] .tab-item:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
+}
+
+[data-platform="gtk4"] .tab-item.active {
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+[data-platform="gtk4"] .tab-add-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: var(--control-bg);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  cursor: pointer;
+}
+
+[data-platform="gtk4"] .tab-add-btn:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
+}
+
+[data-platform="gtk4"] .tab-close-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+[data-platform="gtk4"] .tab-close-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+}
+
+/* GTK 4 Toolbar */
+[data-platform="gtk4"] .toolbar-region {
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border-color);
+}
+
+[data-platform="gtk4"] .tool-btn {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+[data-platform="gtk4"] .tool-btn:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+
+[data-platform="gtk4"] .tool-btn:active:not(:disabled),
+[data-platform="gtk4"] .tool-btn.active {
+  background: var(--accent-color);
+  color: #ffffff;
+}
+
+[data-platform="gtk4"] .primary-action-btn {
+  background: var(--accent-color) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+[data-platform="gtk4"] .primary-action-btn:hover {
+  filter: brightness(1.1);
+}
+
+[data-platform="gtk4"] .tool-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border-color);
+  margin: 0 6px;
+}
+
+[data-platform="gtk4"] .system-style-switcher-btn {
+  border: none;
+  background: var(--control-bg);
+  color: var(--text-primary);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+[data-platform="gtk4"] .system-style-switcher-btn:hover {
+  background: var(--control-hover);
+}
+
+[data-platform="gtk4"] .tool-color-picker {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+[data-platform="gtk4"] .tool-stroke-size {
+  background: var(--control-bg);
+  color: var(--text-primary);
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
