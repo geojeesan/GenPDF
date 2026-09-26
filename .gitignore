@@ -5,8 +5,11 @@ node_modules/
 
 # Build outputs
 dist/
-build/
+release/
 out/
+!build/icon.ico
+!build/icon.png
+!build/installer.nsh
 
 # Environment and portable runtimes
 .node/
@@ -47,3 +50,4 @@ Thumbs.db
 .gemini/
 scratch/
 temp/
+scripts/
