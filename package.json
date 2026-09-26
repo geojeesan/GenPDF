@@ -1,0 +1,61 @@
+{
+  "name": "genpdf",
+  "version": "1.0.0",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "electron electron/main.js",
+    "start": "npm run build && electron electron/main.js",
+    "pack:linux": "npm run build && electron-builder --linux",
+    "pack:appimage": "npm run build && electron-builder --linux AppImage",
+    "pack:deb": "npm run build && electron-builder --linux deb"
+  },
+  "keywords": [
+    "pdf",
+    "viewer",
+    "editor",
+    "electron",
+    "gtk4",
+    "fluent"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "Cross-platform Fluent & GTK4 PDF Viewer and Editor",
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.11.174"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2",
+    "vite": "^6.4.3"
+  },
+  "build": {
+    "appId": "com.genpdf.studio",
+    "productName": "GenPDF Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png",
+      "category": "Office"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    }
+  }
+}

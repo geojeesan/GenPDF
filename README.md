@@ -88,8 +88,10 @@ GenPDF/
 │   ├── viewport/
 │   │   └── viewportManager.ts # Virtualized scroll viewport & trackpad pinch-zoom
 │   └── main.ts                # Application bootstrap
-├── run-dev.bat                # Launch Vite dev server with portable Node
-├── run-electron.bat           # Launch Electron desktop application
+├── run-dev.sh                 # Linux launch script for Vite dev server
+├── run-electron.sh            # Linux launch script for native Electron desktop app
+├── run-dev.bat                # Windows launch script for Vite dev server
+├── run-electron.bat           # Windows launch script for native Electron desktop app
 ├── tsconfig.json              # TypeScript configuration
 └── vite.config.ts             # Vite bundler configuration
 ```
@@ -99,10 +101,21 @@ GenPDF/
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ (Node.js v20.18.0 LTS configured)
+- Node.js 18+ (tested on Node.js 18 & 20 LTS)
 - npm 9+
 
-### Quick Launch Scripts (Windows)
+### Quick Launch Scripts
+
+#### Linux
+```bash
+# Launch native desktop application (GTK 4 / Libadwaita styling)
+./run-electron.sh [optional-file.pdf]
+
+# Or launch Vite development server (http://localhost:5173/)
+./run-dev.sh
+```
+
+#### Windows
 - Double click or execute `.\run-electron.bat` to launch the native desktop application with Mica effect.
 - Double click or execute `.\run-dev.bat` to launch the Vite local dev server.
 
