@@ -28,6 +28,7 @@ export class ViewportManager {
   private autoFitMode: 'none' | 'width' | 'page' = 'none';
   private resizeObserver: ResizeObserver | null = null;
   private resizeDebounceTimer: any = null;
+  private lastMousePos: { clientX: number; clientY: number } | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -38,8 +39,18 @@ export class ViewportManager {
 
     this.setupTrackpadZoom();
     this.setupHandTool();
+    this.setupMouseTracking();
     this.setupIntersectionObserver();
     this.setupResizeObserver();
+  }
+
+  private setupMouseTracking(): void {
+    this.container.addEventListener('pointermove', (e: PointerEvent) => {
+      this.lastMousePos = { clientX: e.clientX, clientY: e.clientY };
+    });
+    this.container.addEventListener('pointerleave', () => {
+      this.lastMousePos = null;
+    });
   }
 
   private setupResizeObserver(): void {
@@ -69,18 +80,7 @@ export class ViewportManager {
           const zoomFactor = 1 - e.deltaY * 0.01;
           const newScale = Math.min(5.0, Math.max(0.2, this.currentScale * zoomFactor));
 
-          const rect = this.container.getBoundingClientRect();
-          const mouseX = e.clientX - rect.left;
-          const mouseY = e.clientY - rect.top;
-
-          const scrollX = this.container.scrollLeft;
-          const scrollY = this.container.scrollTop;
-
-          const ratio = newScale / this.currentScale;
-          this.setScale(newScale, true);
-
-          this.container.scrollLeft = (scrollX + mouseX) * ratio - mouseX;
-          this.container.scrollTop = (scrollY + mouseY) * ratio - mouseY;
+          this.zoomAt(newScale, { clientX: e.clientX, clientY: e.clientY }, true);
 
           clearTimeout(this.pinchEndTimer);
           this.pinchEndTimer = setTimeout(() => {
@@ -150,6 +150,10 @@ export class ViewportManager {
       () => {
         const tab = appState.getActiveTab();
         if (tab && this.pages.size > 0) {
+          tab.scrollPosition = {
+            x: this.container.scrollLeft,
+            y: this.container.scrollTop,
+          };
           const visibleIdx = this.getCurrentVisiblePageIndex();
           if (tab.currentPage !== visibleIdx + 1) {
             tab.currentPage = visibleIdx + 1;
@@ -179,6 +183,80 @@ export class ViewportManager {
     });
 
     return closestPageIndex;
+  }
+
+  public zoomAt(
+    newScale: number,
+    anchor?: { clientX: number; clientY: number },
+    isPinch = false,
+    clearAutoFit = true
+  ): void {
+    if (this.pages.size === 0) return;
+    newScale = Math.min(5.0, Math.max(0.2, newScale));
+    if (Math.abs(newScale - this.currentScale) < 0.0001) return;
+
+    const containerRect = this.container.getBoundingClientRect();
+
+    // Determine target screen coordinates of anchor point
+    let clientX: number;
+    let clientY: number;
+
+    if (anchor) {
+      clientX = anchor.clientX;
+      clientY = anchor.clientY;
+    } else {
+      // Default to center of viewport
+      clientX = containerRect.left + containerRect.width / 2;
+      clientY = containerRect.top + containerRect.height / 2;
+    }
+
+    // Identify target page under the cursor
+    let targetItem: PageItem | null = null;
+    let u = 0.5;
+    let v = 0.5;
+
+    for (const item of this.pages.values()) {
+      const rect = item.element.getBoundingClientRect();
+      if (
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+      ) {
+        targetItem = item;
+        u = (clientX - rect.left) / rect.width;
+        v = (clientY - rect.top) / rect.height;
+        break;
+      }
+    }
+
+    // If not directly over a page (e.g. margin or between pages), anchor to the closest visible page
+    if (!targetItem) {
+      const visibleIdx = this.getCurrentVisiblePageIndex();
+      targetItem = this.pages.get(visibleIdx) || this.pages.values().next().value || null;
+      if (targetItem) {
+        const rect = targetItem.element.getBoundingClientRect();
+        u = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+        v = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+      }
+    }
+
+    // Apply scale to elements
+    this.setScale(newScale, isPinch, clearAutoFit);
+
+    // Adjust scroll to keep the anchor point precisely under the cursor
+    if (targetItem) {
+      const newPageWidth = targetItem.element.offsetWidth;
+      const newPageHeight = targetItem.element.offsetHeight;
+      const targetContentX = targetItem.element.offsetLeft + u * newPageWidth;
+      const targetContentY = targetItem.element.offsetTop + v * newPageHeight;
+
+      const mouseRelX = clientX - containerRect.left;
+      const mouseRelY = clientY - containerRect.top;
+
+      this.container.scrollLeft = Math.max(0, targetContentX - mouseRelX);
+      this.container.scrollTop = Math.max(0, targetContentY - mouseRelY);
+    }
   }
 
   public setScale(scale: number, isPinch = false, clearAutoFit = true): void {
@@ -228,12 +306,14 @@ export class ViewportManager {
     return this.autoFitMode;
   }
 
-  public zoomIn(): void {
-    this.setScale(Math.min(5.0, this.currentScale * 1.25), false, true);
+  public zoomIn(anchor?: { clientX: number; clientY: number }): void {
+    const target = anchor || this.lastMousePos || undefined;
+    this.zoomAt(this.currentScale * 1.25, target, false, true);
   }
 
-  public zoomOut(): void {
-    this.setScale(Math.max(0.2, this.currentScale / 1.25), false, true);
+  public zoomOut(anchor?: { clientX: number; clientY: number }): void {
+    const target = anchor || this.lastMousePos || undefined;
+    this.zoomAt(this.currentScale / 1.25, target, false, true);
   }
 
   public fitWidth(keepMode = true): void {
@@ -245,9 +325,10 @@ export class ViewportManager {
     const firstPage = this.pages.values().next().value;
     if (!firstPage) return;
 
-    const availableWidth = this.container.clientWidth - 80;
+    const availableWidth = this.container.clientWidth - 48;
     const scale = availableWidth / firstPage.baseWidth;
     this.setScale(Math.min(3.0, Math.max(0.3, scale)), false, false);
+    this.container.scrollLeft = 0;
   }
 
   public fitPage(keepMode = true): void {
@@ -259,10 +340,11 @@ export class ViewportManager {
     const firstPage = this.pages.values().next().value;
     if (!firstPage) return;
 
-    const availableWidth = this.container.clientWidth - 80;
-    const availableHeight = this.container.clientHeight - 80;
+    const availableWidth = this.container.clientWidth - 48;
+    const availableHeight = this.container.clientHeight - 64;
     const scale = Math.min(availableWidth / firstPage.baseWidth, availableHeight / firstPage.baseHeight);
     this.setScale(Math.min(3.0, Math.max(0.3, scale)), false, false);
+    this.container.scrollLeft = 0;
   }
 
   public async loadDocument(tab: DocumentTab): Promise<void> {
