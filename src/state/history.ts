@@ -55,6 +55,8 @@ export class HistoryManager {
     this.notify();
   }
 
+  public static onHistoryChange: (() => void) | null = null;
+
   public subscribe(cb: (canUndo: boolean, canRedo: boolean) => void): () => void {
     this.onChangeCallbacks.push(cb);
     cb(this.canUndo(), this.canRedo());
@@ -67,5 +69,8 @@ export class HistoryManager {
     const canUndo = this.canUndo();
     const canRedo = this.canRedo();
     this.onChangeCallbacks.forEach((cb) => cb(canUndo, canRedo));
+    if (HistoryManager.onHistoryChange) {
+      HistoryManager.onHistoryChange();
+    }
   }
 }

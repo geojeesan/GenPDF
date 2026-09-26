@@ -25,6 +25,9 @@ export class ViewportManager {
   private renderDebounceTimer: any = null;
   private isPinchZooming = false;
   private pinchEndTimer: any = null;
+  private autoFitMode: 'none' | 'width' | 'page' = 'none';
+  private resizeObserver: ResizeObserver | null = null;
+  private resizeDebounceTimer: any = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -36,6 +39,24 @@ export class ViewportManager {
     this.setupTrackpadZoom();
     this.setupHandTool();
     this.setupIntersectionObserver();
+    this.setupResizeObserver();
+  }
+
+  private setupResizeObserver(): void {
+    this.resizeObserver = new ResizeObserver(() => {
+      if (this.autoFitMode === 'width') {
+        clearTimeout(this.resizeDebounceTimer);
+        this.resizeDebounceTimer = setTimeout(() => {
+          this.fitWidth(false);
+        }, 16);
+      } else if (this.autoFitMode === 'page') {
+        clearTimeout(this.resizeDebounceTimer);
+        this.resizeDebounceTimer = setTimeout(() => {
+          this.fitPage(false);
+        }, 16);
+      }
+    });
+    this.resizeObserver.observe(this.container);
   }
 
   private setupTrackpadZoom(): void {
@@ -160,7 +181,10 @@ export class ViewportManager {
     return closestPageIndex;
   }
 
-  public setScale(scale: number, isPinch = false): void {
+  public setScale(scale: number, isPinch = false, clearAutoFit = true): void {
+    if (clearAutoFit) {
+      this.autoFitMode = 'none';
+    }
     this.currentScale = scale;
     const tab = appState.getActiveTab();
     if (tab) {
@@ -200,15 +224,22 @@ export class ViewportManager {
     return this.currentScale;
   }
 
+  public getAutoFitMode(): 'none' | 'width' | 'page' {
+    return this.autoFitMode;
+  }
+
   public zoomIn(): void {
-    this.setScale(Math.min(5.0, this.currentScale * 1.25));
+    this.setScale(Math.min(5.0, this.currentScale * 1.25), false, true);
   }
 
   public zoomOut(): void {
-    this.setScale(Math.max(0.2, this.currentScale / 1.25));
+    this.setScale(Math.max(0.2, this.currentScale / 1.25), false, true);
   }
 
-  public fitWidth(): void {
+  public fitWidth(keepMode = true): void {
+    if (keepMode) {
+      this.autoFitMode = 'width';
+    }
     const tab = appState.getActiveTab();
     if (!tab || this.pages.size === 0) return;
     const firstPage = this.pages.values().next().value;
@@ -216,10 +247,13 @@ export class ViewportManager {
 
     const availableWidth = this.container.clientWidth - 80;
     const scale = availableWidth / firstPage.baseWidth;
-    this.setScale(Math.min(3.0, Math.max(0.3, scale)));
+    this.setScale(Math.min(3.0, Math.max(0.3, scale)), false, false);
   }
 
-  public fitPage(): void {
+  public fitPage(keepMode = true): void {
+    if (keepMode) {
+      this.autoFitMode = 'page';
+    }
     const tab = appState.getActiveTab();
     if (!tab || this.pages.size === 0) return;
     const firstPage = this.pages.values().next().value;
@@ -228,7 +262,7 @@ export class ViewportManager {
     const availableWidth = this.container.clientWidth - 80;
     const availableHeight = this.container.clientHeight - 80;
     const scale = Math.min(availableWidth / firstPage.baseWidth, availableHeight / firstPage.baseHeight);
-    this.setScale(Math.min(3.0, Math.max(0.3, scale)));
+    this.setScale(Math.min(3.0, Math.max(0.3, scale)), false, false);
   }
 
   public async loadDocument(tab: DocumentTab): Promise<void> {

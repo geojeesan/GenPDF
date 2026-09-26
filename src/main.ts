@@ -7,6 +7,13 @@ import { ViewportManager } from './viewport/viewportManager';
 import { ThumbnailSidebar } from './sidebar/thumbnailSidebar';
 import { TabManager } from './tabs/tabManager';
 
+import { HistoryManager } from './state/history';
+
+// Connect history notifications to app state so undo/redo buttons update immediately
+HistoryManager.onHistoryChange = () => {
+  appState.notify();
+};
+
 async function bootstrap() {
   const titlebarContainer = document.getElementById('titlebar-container')!;
   const tabsContainer = document.getElementById('tabs-container')!;
@@ -57,6 +64,7 @@ async function bootstrap() {
       if (tab) {
         tab.history.undo();
         viewportManager.refreshAnnotations();
+        appState.notify();
       }
     } else if (isCtrl && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
       e.preventDefault();
@@ -64,6 +72,7 @@ async function bootstrap() {
       if (tab) {
         tab.history.redo();
         viewportManager.refreshAnnotations();
+        appState.notify();
       }
     } else if (isCtrl && e.key.toLowerCase() === 'o') {
       e.preventDefault();

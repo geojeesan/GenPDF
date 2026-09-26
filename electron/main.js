@@ -11,8 +11,8 @@ function createWindow() {
   const windowOptions = {
     width: 1280,
     height: 850,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: 640,
+    minHeight: 480,
     title: 'GenPDF',
     backgroundColor: '#00000000', // transparent for Mica on Windows
     webPreferences: {

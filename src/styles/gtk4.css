@@ -67,17 +67,19 @@
   color: var(--text-primary);
 }
 
-/* GTK 4 HeaderBar Titlebar */
+/* GTK 4 HeaderBar Titlebar (Combined with Tabs) */
 [data-platform="gtk4"] .titlebar-region {
   background: var(--header-bg);
   border-bottom: 1px solid var(--border-color);
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
 }
 
 [data-platform="gtk4"] .titlebar-drag-region {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: 100%;
+  height: 40px;
   padding: 0 12px;
   position: relative;
 }
@@ -86,6 +88,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+  padding-right: 8px;
 }
 
 [data-platform="gtk4"] .app-logo {
@@ -94,18 +98,11 @@
   align-items: center;
 }
 
-[data-platform="gtk4"] .app-title {
-  font-weight: 700;
-  font-size: 13px;
-}
-
-[data-platform="gtk4"] .titlebar-center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
+[data-platform="gtk4"] .titlebar-drag-spacer {
+  flex: 1 1 20px;
+  min-width: 20px;
+  height: 100%;
+  -webkit-app-region: drag;
 }
 
 /* GTK 4 Window Controls (Libadwaita circular close button) */
@@ -140,13 +137,14 @@
   color: #ffffff !important;
 }
 
-/* AdwTabBar (Libadwaita Tabs) */
+/* AdwTabBar (Libadwaita Tabs Combined in Header) */
 [data-platform="gtk4"] .tabs-region {
   display: flex;
   align-items: center;
-  padding: 4px 10px;
-  background: var(--header-bg);
-  border-bottom: 1px solid var(--border-color);
+  height: 100%;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
 }
 
 [data-platform="gtk4"] .tab-strip-list {
@@ -180,9 +178,10 @@
 
 [data-platform="gtk4"] .tab-item.active {
   background: var(--card-bg);
-  color: var(--text-primary);
   border-color: var(--border-color);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
 [data-platform="gtk4"] .tab-add-btn {
@@ -253,21 +252,12 @@
   color: #ffffff;
 }
 
-[data-platform="gtk4"] .primary-action-btn {
-  background: var(--accent-color) !important;
-  color: #ffffff !important;
-  font-weight: 600;
-}
-
-[data-platform="gtk4"] .primary-action-btn:hover {
-  filter: brightness(1.1);
-}
-
 [data-platform="gtk4"] .tool-separator {
   width: 1px;
   height: 20px;
   background: var(--border-color);
   margin: 0 6px;
+  flex-shrink: 0;
 }
 
 [data-platform="gtk4"] .system-style-switcher-btn {
