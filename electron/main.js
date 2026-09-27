@@ -2,28 +2,72 @@ const { app, BrowserWindow, ipcMain, dialog, systemPreferences } = require('elec
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { URL, fileURLToPath } = require('url');
 
 let mainWindow;
+let queuedFiles = [];
 
-// Extract PDF files passed from CLI
-function getCliPdfFiles() {
-  const args = process.argv.slice(app.isPackaged ? 1 : 2);
-  const pdfFiles = [];
-  for (const arg of args) {
-    if (!arg.startsWith('-') && fs.existsSync(arg) && arg.toLowerCase().endsWith('.pdf')) {
+// Parse individual PDF file argument or file:// URI
+function parsePdfFileArg(rawArg, cwd = process.cwd()) {
+  if (!rawArg || typeof rawArg !== 'string' || rawArg.startsWith('-')) {
+    return null;
+  }
+  let filePath = rawArg;
+  if (filePath.startsWith('file://')) {
+    try {
+      filePath = fileURLToPath(filePath);
+    } catch (e) {
       try {
-        const absPath = path.resolve(arg);
-        pdfFiles.push({
-          name: path.basename(absPath),
-          path: absPath,
-          data: fs.readFileSync(absPath).buffer,
-        });
-      } catch (e) {
-        console.error('Failed to read CLI argument PDF:', arg, e);
+        filePath = decodeURIComponent(new URL(filePath).pathname);
+      } catch (err) {
+        // ignore
       }
     }
   }
+
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(cwd, filePath);
+  if (fs.existsSync(resolved) && resolved.toLowerCase().endsWith('.pdf')) {
+    try {
+      return {
+        name: path.basename(resolved),
+        path: resolved,
+        data: fs.readFileSync(resolved).buffer,
+      };
+    } catch (e) {
+      console.error('Failed to read PDF file:', resolved, e);
+    }
+  }
+  return null;
+}
+
+// Extract PDF files passed from CLI
+function extractPdfFiles(args, cwd = process.cwd()) {
+  const pdfFiles = [];
+  if (!Array.isArray(args)) return pdfFiles;
+  for (const arg of args) {
+    const file = parsePdfFileArg(arg, cwd);
+    if (file) {
+      pdfFiles.push(file);
+    }
+  }
   return pdfFiles;
+}
+
+function getCliPdfFiles() {
+  const args = process.argv.slice(app.isPackaged ? 1 : 2);
+  const initialFiles = extractPdfFiles(args);
+  const allFiles = [...initialFiles, ...queuedFiles];
+  queuedFiles = [];
+  return allFiles;
+}
+
+function openPdfFiles(files) {
+  if (!files || files.length === 0) return;
+  if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.send('app:open-files', files);
+  } else {
+    queuedFiles.push(...files);
+  }
 }
 
 function createWindow() {
@@ -87,6 +131,14 @@ function createWindow() {
     }
   });
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (queuedFiles.length > 0) {
+      const filesToSend = [...queuedFiles];
+      queuedFiles = [];
+      mainWindow.webContents.send('app:open-files', filesToSend);
+    }
+  });
+
   mainWindow.on('maximize', () => {
     mainWindow?.webContents.send('window:maximized-change', true);
   });
@@ -105,10 +157,14 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on('second-instance', (event, commandLine) => {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
+    }
+    const files = extractPdfFiles(commandLine.slice(1), workingDirectory);
+    if (files.length > 0) {
+      openPdfFiles(files);
     }
   });
 
@@ -120,6 +176,14 @@ if (!gotTheLock) {
     });
   });
 }
+
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  const file = parsePdfFileArg(filePath);
+  if (file) {
+    openPdfFiles([file]);
+  }
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

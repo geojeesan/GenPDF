@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMaximizedChange: (callback) => ipcRenderer.on('window:maximized-change', (event, isMax) => callback(isMax)),
   getSystemAccentColor: () => ipcRenderer.invoke('system:getAccentColor'),
   getInitialFiles: () => ipcRenderer.invoke('app:getInitialFiles'),
+  onOpenFiles: (callback) => ipcRenderer.on('app:open-files', (event, files) => callback(files)),
 });

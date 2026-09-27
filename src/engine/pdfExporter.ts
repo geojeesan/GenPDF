@@ -121,6 +121,26 @@ export class PDFExporter {
 
     const textColor = this.hexToRgb(ann.color) || rgb(0, 0, 0);
 
+    // If this is an existing text edit or has originalBounds, redact / whiteout original bounding box first
+    if (ann.isExistingTextEdit && ann.originalBounds) {
+      const origX = ann.originalBounds.x * pageWidth;
+      const origW = ann.originalBounds.width * pageWidth;
+      const origH = ann.originalBounds.height * pageHeight;
+      const origY = pageHeight - ((ann.originalBounds.y + ann.originalBounds.height) * pageHeight);
+
+      // Cover whichever is larger between original bounds and new text width/height
+      const whiteoutW = Math.max(origW, ann.width * pageWidth);
+      const whiteoutH = Math.max(origH, ann.height * pageHeight);
+
+      page.drawRectangle({
+        x: Math.max(0, origX - 1),
+        y: Math.max(0, origY - 1),
+        width: whiteoutW + 2,
+        height: whiteoutH + 2,
+        color: rgb(1, 1, 1),
+      });
+    }
+
     // Optional background box
     if (ann.backgroundColor && ann.backgroundColor !== 'transparent') {
       const bgColor = this.hexToRgb(ann.backgroundColor);
@@ -135,11 +155,44 @@ export class PDFExporter {
       }
     }
 
-    const lines = ann.text.split('\n');
+    const maxWidth = ann.width * pageWidth;
+    const rawLines = (ann.text || '').split('\n');
+    const lines: string[] = [];
+
+    for (const rawLine of rawLines) {
+      if (!maxWidth || maxWidth <= 0 || font.widthOfTextAtSize(rawLine, ann.fontSize) <= maxWidth || ann.isExistingTextEdit) {
+        lines.push(rawLine);
+        continue;
+      }
+      const words = rawLine.split(' ');
+      let currentLine = '';
+      for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        if (font.widthOfTextAtSize(testLine, ann.fontSize) > maxWidth && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      if (currentLine) {
+        lines.push(currentLine);
+      }
+    }
+
     let lineY = y;
     for (const line of lines) {
+      let lineX = x;
+      if (ann.textAlign === 'center') {
+        const lineWidth = font.widthOfTextAtSize(line, ann.fontSize);
+        lineX = x + Math.max(0, (ann.width * pageWidth - lineWidth) / 2);
+      } else if (ann.textAlign === 'right') {
+        const lineWidth = font.widthOfTextAtSize(line, ann.fontSize);
+        lineX = x + Math.max(0, ann.width * pageWidth - lineWidth);
+      }
+
       page.drawText(line, {
-        x,
+        x: lineX,
         y: lineY,
         size: ann.fontSize,
         font,
@@ -165,7 +218,7 @@ export class PDFExporter {
       page.drawLine({
         start: { x: p1.x * pageWidth, y: pageHeight - (p1.y * pageHeight) },
         end: { x: p2.x * pageWidth, y: pageHeight - (p2.y * pageHeight) },
-        thickness: ann.strokeWidth || 2,
+        thickness: ann.strokeWidth,
         color: strokeColor,
         opacity: ann.opacity ?? 1,
       });
@@ -179,7 +232,7 @@ export class PDFExporter {
     pageHeight: number
   ) {
     if (!ann.points || ann.points.length < 2) return;
-    const highlightColor = this.hexToRgb(ann.color) || rgb(1, 0.9, 0.2);
+    const strokeColor = this.hexToRgb(ann.color) || rgb(1, 1, 0);
 
     for (let i = 0; i < ann.points.length - 1; i++) {
       const p1 = ann.points[i];
@@ -188,9 +241,9 @@ export class PDFExporter {
       page.drawLine({
         start: { x: p1.x * pageWidth, y: pageHeight - (p1.y * pageHeight) },
         end: { x: p2.x * pageWidth, y: pageHeight - (p2.y * pageHeight) },
-        thickness: ann.strokeWidth || 16,
-        color: highlightColor,
-        opacity: ann.opacity ?? 0.4,
+        thickness: ann.strokeWidth || 18,
+        color: strokeColor,
+        opacity: ann.opacity ?? 0.35,
       });
     }
   }
@@ -201,12 +254,13 @@ export class PDFExporter {
     pageWidth: number,
     pageHeight: number
   ) {
+    const strokeColor = this.hexToRgb(ann.strokeColor) || rgb(0, 0, 0);
+    const fillColor = this.hexToRgb(ann.fillColor);
+
     const x = ann.x * pageWidth;
     const y = pageHeight - ((ann.y + ann.height) * pageHeight);
     const w = ann.width * pageWidth;
     const h = ann.height * pageHeight;
-    const strokeColor = this.hexToRgb(ann.strokeColor);
-    const fillColor = this.hexToRgb(ann.fillColor);
 
     if (ann.type === 'rectangle') {
       page.drawRectangle({
@@ -214,63 +268,38 @@ export class PDFExporter {
         y,
         width: w,
         height: h,
-        borderWidth: ann.strokeWidth || 2,
-        borderColor: strokeColor || undefined,
+        borderWidth: ann.strokeWidth,
+        borderColor: strokeColor,
         color: fillColor || undefined,
         opacity: ann.opacity ?? 1,
       });
     } else if (ann.type === 'circle') {
+      const xRadius = w / 2;
+      const yRadius = h / 2;
       page.drawEllipse({
-        x: x + w / 2,
-        y: y + h / 2,
-        xScale: w / 2,
-        yScale: h / 2,
-        borderWidth: ann.strokeWidth || 2,
-        borderColor: strokeColor || undefined,
+        x: x + xRadius,
+        y: y + yRadius,
+        xScale: xRadius,
+        yScale: yRadius,
+        borderWidth: ann.strokeWidth,
+        borderColor: strokeColor,
         color: fillColor || undefined,
         opacity: ann.opacity ?? 1,
       });
     } else if (ann.type === 'line' || ann.type === 'arrow') {
-      const sx = (ann.startPoint ? ann.startPoint.x : ann.x) * pageWidth;
-      const sy = (ann.startPoint ? ann.startPoint.y : ann.y) * pageHeight;
-      const ex = (ann.endPoint ? ann.endPoint.x : ann.x + ann.width) * pageWidth;
-      const ey = (ann.endPoint ? ann.endPoint.y : ann.y + ann.height) * pageHeight;
-
-      const pdfStartX = sx;
-      const pdfStartY = pageHeight - sy;
-      const pdfEndX = ex;
-      const pdfEndY = pageHeight - ey;
+      if (!ann.startPoint || !ann.endPoint) return;
+      const sx = ann.startPoint.x * pageWidth;
+      const sy = pageHeight - (ann.startPoint.y * pageHeight);
+      const ex = ann.endPoint.x * pageWidth;
+      const ey = pageHeight - (ann.endPoint.y * pageHeight);
 
       page.drawLine({
-        start: { x: pdfStartX, y: pdfStartY },
-        end: { x: pdfEndX, y: pdfEndY },
-        thickness: ann.strokeWidth || 2,
-        color: strokeColor || rgb(0, 0, 0),
+        start: { x: sx, y: sy },
+        end: { x: ex, y: ey },
+        thickness: ann.strokeWidth,
+        color: strokeColor,
         opacity: ann.opacity ?? 1,
       });
-
-      if (ann.type === 'arrow') {
-        const angle = Math.atan2(pdfEndY - pdfStartY, pdfEndX - pdfStartX);
-        const headLen = Math.max(10, (ann.strokeWidth || 2) * 3.5);
-        page.drawLine({
-          start: { x: pdfEndX, y: pdfEndY },
-          end: {
-            x: pdfEndX - headLen * Math.cos(angle - Math.PI / 6),
-            y: pdfEndY - headLen * Math.sin(angle - Math.PI / 6),
-          },
-          thickness: ann.strokeWidth || 2,
-          color: strokeColor || rgb(0, 0, 0),
-        });
-        page.drawLine({
-          start: { x: pdfEndX, y: pdfEndY },
-          end: {
-            x: pdfEndX - headLen * Math.cos(angle + Math.PI / 6),
-            y: pdfEndY - headLen * Math.sin(angle + Math.PI / 6),
-          },
-          thickness: ann.strokeWidth || 2,
-          color: strokeColor || rgb(0, 0, 0),
-        });
-      }
     }
   }
 
@@ -282,24 +311,25 @@ export class PDFExporter {
     pageHeight: number
   ) {
     if (!ann.imageDataUrl) return;
+
     try {
       const base64Data = ann.imageDataUrl.split(',')[1];
       const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-      const pngImage = await doc.embedPng(imageBytes);
+      const image = await doc.embedPng(imageBytes);
 
       const x = ann.x * pageWidth;
       const y = pageHeight - ((ann.y + ann.height) * pageHeight);
       const w = ann.width * pageWidth;
       const h = ann.height * pageHeight;
 
-      page.drawImage(pngImage, {
+      page.drawImage(image, {
         x,
         y,
         width: w,
         height: h,
       });
     } catch (err) {
-      console.error('Failed to embed signature image:', err);
+      console.error('Failed to embed signature PNG into exported PDF:', err);
     }
   }
 
@@ -314,47 +344,32 @@ export class PDFExporter {
     const y = pageHeight - ((ann.y + ann.height) * pageHeight);
     const w = ann.width * pageWidth;
     const h = ann.height * pageHeight;
-    const stampColor = this.hexToRgb(ann.color) || rgb(0.8, 0.1, 0.1);
+    const color = this.hexToRgb(ann.color) || rgb(0.8, 0, 0);
 
-    // Double-lined box for official stamp look
+    // Stamp outline
     page.drawRectangle({
       x,
       y,
       width: w,
       height: h,
-      borderWidth: 2.5,
-      borderColor: stampColor,
-      color: rgb(1, 1, 1),
-      opacity: 0.9,
+      borderWidth: 3,
+      borderColor: color,
     });
 
-    page.drawRectangle({
-      x: x + 3,
-      y: y + 3,
-      width: w - 6,
-      height: h - 6,
-      borderWidth: 1,
-      borderColor: stampColor,
-    });
+    // Stamp text
+    const label = ann.label.toUpperCase();
+    const fontSize = Math.min(h * 0.45, 20);
+    const labelWidth = fontBold.widthOfTextAtSize(label, fontSize);
+    const textX = x + (w - labelWidth) / 2;
+    const textY = y + (h / 2) - (fontSize / 4);
 
-    const fontSize = Math.min(h * 0.45, 18);
-    page.drawText(ann.label, {
-      x: x + (w - fontBold.widthOfTextAtSize(ann.label, fontSize)) / 2,
-      y: y + (h / 2) - (fontSize / 3) + (ann.dateStr ? 4 : 0),
+    page.drawText(label, {
+      x: Math.max(x + 4, textX),
+      y: textY,
       size: fontSize,
       font: fontBold,
-      color: stampColor,
+      color,
     });
-
-    if (ann.dateStr) {
-      page.drawText(ann.dateStr, {
-        x: x + (w - fontBold.widthOfTextAtSize(ann.dateStr, 8)) / 2,
-        y: y + 8,
-        size: 8,
-        font: fontBold,
-        color: stampColor,
-      });
-    }
   }
 
   private static drawRedactionAnnotation(
@@ -367,14 +382,14 @@ export class PDFExporter {
     const y = pageHeight - ((ann.y + ann.height) * pageHeight);
     const w = ann.width * pageWidth;
     const h = ann.height * pageHeight;
-    const fillColor = this.hexToRgb(ann.fillColor) || rgb(0, 0, 0);
+    const color = this.hexToRgb(ann.fillColor) || rgb(0, 0, 0);
 
     page.drawRectangle({
       x,
       y,
       width: w,
       height: h,
-      color: fillColor,
+      color,
     });
   }
 }

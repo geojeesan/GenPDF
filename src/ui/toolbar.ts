@@ -120,6 +120,14 @@ export class Toolbar {
 
         <!-- Drawing & Markup Tools -->
         <div class="tool-group group-draw">
+          <!-- Edit Existing PDF Text Tool -->
+          <button class="tool-btn tool-edit-text ${appState.getTool() === 'edit-text' ? 'active' : ''}" data-tool="edit-text" title="Edit PDF Text (E)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+          </button>
+
           <!-- Text Tool -->
           <button class="tool-btn tool-text ${appState.getTool() === 'text' ? 'active' : ''}" data-tool="text" title="Add Text Box (T)">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -222,10 +230,12 @@ export class Toolbar {
         <div class="tool-options-bar">
           <input type="color" class="tool-color-picker" value="${currentPenColor}" title="Stroke Color" />
 
-          <!-- Custom Modern Thickness Selector Dropdown -->
+          <!-- Custom Modern Thickness / Font Size Selector Dropdown -->
           <div class="thickness-dropdown" id="thickness-dropdown">
-            <button type="button" class="thickness-trigger-btn" title="Line Thickness" aria-haspopup="true" aria-expanded="false">
-              <span class="thickness-preview-line" style="height: ${Math.min(currentPenWidth, 8)}px; background-color: ${currentPenColor};"></span>
+            <button type="button" class="thickness-trigger-btn" title="Property Value" aria-haspopup="true" aria-expanded="false">
+              <span class="thickness-preview-indicator">
+                <span class="thickness-preview-line" style="height: ${Math.min(currentPenWidth, 8)}px; background-color: ${currentPenColor};"></span>
+              </span>
               <span class="thickness-label">${currentPenWidth} pt</span>
               <svg class="dropdown-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <polyline points="6 9 12 15 18 9"></polyline>
@@ -363,6 +373,15 @@ export class Toolbar {
         iconSvg: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>`,
         getBtn: () => this.container.querySelector('.tool-rectangle'),
         groupClass: 'group-shapes',
+      },
+      {
+        id: 'edit-text',
+        name: 'Edit PDF Text',
+        tool: 'edit-text',
+        shortcut: 'E',
+        iconSvg: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`,
+        getBtn: () => this.container.querySelector('.tool-edit-text'),
+        groupClass: 'group-draw',
       },
       {
         id: 'highlight',
@@ -685,13 +704,35 @@ export class Toolbar {
       appState.toolSettings.shape.strokeColor = val;
       appState.toolSettings.text.color = val;
 
+      const selectedId = appState.getSelectedAnnotationId();
+      const tab = appState.getActiveTab();
+      if (selectedId && tab) {
+        for (const anns of Object.values(tab.annotations)) {
+          const ann = (anns as any[]).find((a) => a.id === selectedId);
+          if (ann) {
+            if (ann.type === 'text') {
+              ann.color = val;
+              tab.isDirty = true;
+              this.viewportManager.refreshAnnotations();
+            } else if (ann.type === 'pen') {
+              ann.color = val;
+              tab.isDirty = true;
+              this.viewportManager.refreshAnnotations();
+            } else if (['rectangle', 'circle', 'line', 'arrow'].includes(ann.type)) {
+              ann.strokeColor = val;
+              tab.isDirty = true;
+              this.viewportManager.refreshAnnotations();
+            }
+          }
+        }
+      }
+
       this.updateThicknessColors(val);
     });
 
-    // Modern Thickness Selector Dropdown
+    // Modern Thickness / Font Size Selector Dropdown
     const thicknessTriggerBtn = this.container.querySelector('.thickness-trigger-btn') as HTMLButtonElement;
     const thicknessMenu = this.container.querySelector('.thickness-menu') as HTMLElement;
-    const thicknessOptions = this.container.querySelectorAll<HTMLButtonElement>('.thickness-option');
 
     thicknessTriggerBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -704,19 +745,49 @@ export class Toolbar {
       if (overflowDropdown) overflowDropdown.classList.remove('open');
     });
 
-    thicknessOptions.forEach((opt) => {
-      opt.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const val = Number(opt.getAttribute('data-value'));
+    thicknessMenu.addEventListener('click', (e) => {
+      const opt = (e.target as HTMLElement).closest('.thickness-option');
+      if (!opt) return;
+      e.stopPropagation();
+      const val = Number(opt.getAttribute('data-value'));
+      if (isNaN(val)) return;
+
+      const tab = appState.getActiveTab();
+      const tool = appState.getTool();
+      const selectedId = appState.getSelectedAnnotationId();
+      let selectedAnn: any = null;
+      if (tab && selectedId) {
+        for (const anns of Object.values(tab.annotations)) {
+          const found = (anns as any[]).find((a) => a.id === selectedId);
+          if (found) {
+            selectedAnn = found;
+            break;
+          }
+        }
+      }
+
+      const isTextMode = tool === 'text' || tool === 'edit-text' || (selectedAnn?.type === 'text');
+      if (isTextMode) {
+        appState.toolSettings.text.fontSize = val;
+        if (selectedAnn && selectedAnn.type === 'text') {
+          selectedAnn.fontSize = val;
+          tab!.isDirty = true;
+          this.viewportManager.refreshAnnotations();
+        }
+      } else {
         appState.toolSettings.pen.width = val;
         appState.toolSettings.shape.strokeWidth = val;
+        if (selectedAnn && 'strokeWidth' in selectedAnn) {
+          selectedAnn.strokeWidth = val;
+          tab!.isDirty = true;
+          this.viewportManager.refreshAnnotations();
+        }
+      }
 
-        this.setThicknessValue(val);
-
-        thicknessMenu.classList.remove('open');
-        thicknessTriggerBtn.classList.remove('open');
-        thicknessTriggerBtn.setAttribute('aria-expanded', 'false');
-      });
+      this.updateState();
+      thicknessMenu.classList.remove('open');
+      thicknessTriggerBtn.classList.remove('open');
+      thicknessTriggerBtn.setAttribute('aria-expanded', 'false');
     });
 
     // Firefox-style Overflow button
@@ -783,16 +854,75 @@ export class Toolbar {
     });
   }
 
-  private setThicknessValue(val: number): void {
+  private renderPropertyMenu(isTextMode: boolean, currentVal: number, currentColor: string): void {
+    const triggerBtn = this.container.querySelector('.thickness-trigger-btn') as HTMLElement;
     const label = this.container.querySelector('.thickness-label');
-    const preview = this.container.querySelector('.thickness-trigger-btn .thickness-preview-line') as HTMLElement;
-    if (label) label.textContent = `${val} pt`;
-    if (preview) preview.style.height = `${Math.min(val, 8)}px`;
+    const previewContainer = this.container.querySelector('.thickness-preview-indicator');
+    const menu = this.container.querySelector('.thickness-menu') as HTMLElement;
+    if (!triggerBtn || !label || !menu) return;
 
-    this.container.querySelectorAll('.thickness-option').forEach((opt) => {
-      const optVal = Number(opt.getAttribute('data-value'));
-      opt.classList.toggle('active', optVal === val);
-    });
+    if (isTextMode) {
+      triggerBtn.title = 'Font Size';
+      label.textContent = `${currentVal} pt`;
+      if (previewContainer) {
+        previewContainer.innerHTML = `<span style="font-weight: 800; font-size: 13px; color: ${currentColor}; display: inline-block; width: 14px; text-align: center;">A</span>`;
+      }
+
+      const fontSizes = [
+        { val: 10, label: '10 pt (Small)' },
+        { val: 12, label: '12 pt (Body)' },
+        { val: 14, label: '14 pt (Normal)' },
+        { val: 16, label: '16 pt (Medium)' },
+        { val: 20, label: '20 pt (Large)' },
+        { val: 24, label: '24 pt (Title)' },
+        { val: 32, label: '32 pt (Headline)' },
+      ];
+
+      menu.innerHTML = `
+        <div class="thickness-menu-header">Font Size</div>
+        ${fontSizes
+          .map(
+            (opt) => `
+          <button type="button" class="thickness-option ${currentVal === opt.val ? 'active' : ''}" data-value="${opt.val}" role="menuitem">
+            <span style="font-size: 12px; font-weight: bold; width: 20px; text-align: center; color: ${currentColor};">${opt.val}</span>
+            <span class="thickness-option-text">${opt.label}</span>
+            <span class="thickness-check">✓</span>
+          </button>
+        `
+          )
+          .join('')}
+      `;
+    } else {
+      triggerBtn.title = 'Stroke Thickness';
+      label.textContent = `${currentVal} pt`;
+      if (previewContainer) {
+        previewContainer.innerHTML = `<span class="thickness-preview-line" style="height: ${Math.min(currentVal, 8)}px; background-color: ${currentColor}; width: 20px; border-radius: 2px; display: inline-block;"></span>`;
+      }
+
+      const strokeSizes = [
+        { val: 1, label: '1 pt (Fine)', h: 1 },
+        { val: 2, label: '2 pt (Light)', h: 2 },
+        { val: 3, label: '3 pt (Medium)', h: 3 },
+        { val: 5, label: '5 pt (Bold)', h: 5 },
+        { val: 8, label: '8 pt (Heavy)', h: 8 },
+        { val: 16, label: '16 pt (Marker)', h: 12 },
+      ];
+
+      menu.innerHTML = `
+        <div class="thickness-menu-header">Stroke Thickness</div>
+        ${strokeSizes
+          .map(
+            (opt) => `
+          <button type="button" class="thickness-option ${currentVal === opt.val ? 'active' : ''}" data-value="${opt.val}" role="menuitem">
+            <div class="thickness-line-preview" style="height: ${opt.h}px; ${opt.val === 16 ? 'border-radius: 6px;' : ''} background-color: ${currentColor}; width: 24px;"></div>
+            <span class="thickness-option-text">${opt.label}</span>
+            <span class="thickness-check">✓</span>
+          </button>
+        `
+          )
+          .join('')}
+      `;
+    }
   }
 
   private updateThicknessColors(color: string): void {
@@ -842,19 +972,38 @@ export class Toolbar {
       redoBtn.disabled = !tab.history.canRedo();
     }
 
-    // Keep color picker & preview lines in sync
-    const colorPicker = this.container.querySelector('.tool-color-picker') as HTMLInputElement;
-    if (colorPicker && appState.toolSettings.pen.color) {
-      const hex = appState.toolSettings.pen.color;
-      if (/^#[0-9A-Fa-f]{6}$/.test(hex) && colorPicker.value.toLowerCase() !== hex.toLowerCase()) {
-        colorPicker.value = hex;
-        this.updateThicknessColors(hex);
+    // Find selected annotation if any
+    const selectedId = appState.getSelectedAnnotationId();
+    let selectedAnn: any = null;
+    if (tab && selectedId) {
+      for (const anns of Object.values(tab.annotations)) {
+        const found = (anns as any[]).find((a) => a.id === selectedId);
+        if (found) {
+          selectedAnn = found;
+          break;
+        }
       }
     }
 
-    // Sync thickness UI
-    const width = appState.toolSettings.pen.width || 3;
-    this.setThicknessValue(width);
+    const isTextMode = tool === 'text' || tool === 'edit-text' || (selectedAnn?.type === 'text');
+    const currentColor = isTextMode
+      ? (selectedAnn && selectedAnn.type === 'text' ? selectedAnn.color : appState.toolSettings.text.color)
+      : (selectedAnn && 'color' in selectedAnn ? selectedAnn.color : (selectedAnn && 'strokeColor' in selectedAnn ? selectedAnn.strokeColor : appState.toolSettings.pen.color));
+
+    const currentVal = isTextMode
+      ? (selectedAnn && selectedAnn.type === 'text' ? selectedAnn.fontSize : appState.toolSettings.text.fontSize)
+      : (selectedAnn && 'strokeWidth' in selectedAnn ? selectedAnn.strokeWidth : (appState.toolSettings.pen.width || 3));
+
+    // Keep color picker in sync
+    const colorPicker = this.container.querySelector('.tool-color-picker') as HTMLInputElement;
+    if (colorPicker && currentColor) {
+      if (/^#[0-9A-Fa-f]{6}$/.test(currentColor) && colorPicker.value.toLowerCase() !== currentColor.toLowerCase()) {
+        colorPicker.value = currentColor;
+      }
+    }
+
+    // Render property menu content (Font Size vs Stroke Thickness)
+    this.renderPropertyMenu(isTextMode, currentVal, currentColor);
 
     // Refresh overflow menu items and indicator
     this.renderOverflowMenuContent();

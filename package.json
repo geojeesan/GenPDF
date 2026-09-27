@@ -1,6 +1,7 @@
 {
   "name": "genpdf",
   "version": "1.0.0",
+  "desktopName": "genpdf.desktop",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -8,9 +9,10 @@
     "preview": "vite preview",
     "electron": "electron electron/main.js",
     "start": "npm run build && electron electron/main.js",
-    "pack:linux": "npm run build && electron-builder --linux",
-    "pack:appimage": "npm run build && electron-builder --linux AppImage",
-    "pack:deb": "npm run build && electron-builder --linux deb"
+    "pack:linux": "npm run build && electron-builder --linux deb rpm",
+    "pack:deb": "npm run build && electron-builder --linux deb",
+    "pack:rpm": "npm run build && electron-builder --linux rpm",
+    "pack:appimage": "npm run build && electron-builder --linux AppImage"
   },
   "keywords": [
     "pdf",
@@ -20,7 +22,7 @@
     "gtk4",
     "fluent"
   ],
-  "author": "",
+  "author": "Geo Jeesan <81578090+geojeesan@users.noreply.github.com>",
   "license": "ISC",
   "description": "Cross-platform Fluent & GTK4 PDF Viewer and Editor",
   "dependencies": {
@@ -34,9 +36,14 @@
     "typescript": "^7.0.2",
     "vite": "^6.4.3"
   },
+  "overrides": {
+    "@noble/hashes": "1.8.0"
+  },
   "build": {
     "appId": "com.genpdf.studio",
     "productName": "GenPDF Studio",
+    "executableName": "genpdf",
+    "npmRebuild": false,
     "directories": {
       "output": "release"
     },
@@ -45,13 +52,40 @@
       "electron/**/*",
       "package.json"
     ],
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "description": "Portable Document Format (PDF)",
+        "mimeType": "application/pdf",
+        "role": "Editor"
+      }
+    ],
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        "deb",
+        "rpm"
       ],
+      "syncDesktopName": true,
+      "maintainer": "Geo Jeesan <81578090+geojeesan@users.noreply.github.com>",
       "icon": "build/icon.png",
-      "category": "Office"
+      "category": "Office;Graphics;Viewer",
+      "desktop": {
+        "entry": {
+          "Name": "GenPDF Studio",
+          "Comment": "Fast, modern PDF viewer and editor with GTK4 / Libadwaita styling",
+          "GenericName": "PDF Editor",
+          "Terminal": "false",
+          "Type": "Application"
+        }
+      }
+    },
+    "deb": {
+      "priority": "optional",
+      "packageCategory": "office"
+    },
+    "rpm": {
+      "packageCategory": "Office"
     },
     "win": {
       "target": "nsis",

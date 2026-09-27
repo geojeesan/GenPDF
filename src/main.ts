@@ -50,6 +50,7 @@ async function bootstrap() {
 
     // Sync active tool attribute for cursor styles
     document.getElementById('app')!.setAttribute('data-tool', appState.getTool());
+    viewportManager.refreshAnnotations();
   });
 
   // Global Keyboard Shortcuts
@@ -89,6 +90,7 @@ async function bootstrap() {
     } else if (!isCtrl && !isTyping) {
       if (e.key.toLowerCase() === 'v') appState.setTool('select');
       if (e.key.toLowerCase() === 'h') appState.setTool('hand');
+      if (e.key.toLowerCase() === 'e') appState.setTool('edit-text');
       if (e.key.toLowerCase() === 't') appState.setTool('text');
       if (e.key.toLowerCase() === 'p') appState.setTool('pen');
     }
@@ -109,6 +111,17 @@ async function bootstrap() {
     } catch (err) {
       console.warn('Failed to load CLI PDF files:', err);
     }
+  }
+
+  // Listen for files opened dynamically via system association / second instance
+  if (winObj.electronAPI?.onOpenFiles) {
+    winObj.electronAPI.onOpenFiles(async (files: any[]) => {
+      if (files && files.length > 0) {
+        for (const file of files) {
+          await tabManager.openPDF(file.name, file.data);
+        }
+      }
+    });
   }
 
   // Load interactive demo PDF on startup if no file was opened

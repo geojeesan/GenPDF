@@ -11,7 +11,20 @@ import {
   Point 
 } from './annotationTypes';
 
+export interface ParsedTextItem {
+  str: string;
+  x: number; // normalized
+  y: number; // normalized
+  width: number; // normalized
+  height: number; // normalized
+  fontSize: number; // pt
+  fontFamily: string;
+  isBold: boolean;
+  isItalic: boolean;
+}
+
 export class AnnotationLayer {
+  private parsedTextItems: ParsedTextItem[] = [];
   private pageIndex: number;
   private container: HTMLElement;
   private svgLayer: SVGSVGElement;
@@ -27,10 +40,16 @@ export class AnnotationLayer {
   private dragStartNorm: Point = { x: 0, y: 0 };
   private initialAnnotationState: any = null;
   private editingTextAnnId: string | null = null;
+  private hasDragged: boolean = false;
+  private scale: number = 1.0;
+  private baseWidth: number = 0;
+  private baseHeight: number = 0;
 
-  constructor(pageIndex: number, container: HTMLElement) {
+  constructor(pageIndex: number, container: HTMLElement, baseWidth: number = 0, baseHeight: number = 0) {
     this.pageIndex = pageIndex;
     this.container = container;
+    this.baseWidth = baseWidth;
+    this.baseHeight = baseHeight;
 
     // SVG Layer for crisp vector annotations (pen, highlighter, shapes, redaction)
     this.svgLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -71,7 +90,100 @@ export class AnnotationLayer {
     this.attachEventListeners();
   }
 
-  public updateDimensions(width: number, height: number): void {
+  public setBaseDimensions(baseWidth: number, baseHeight: number): void {
+    this.baseWidth = baseWidth;
+    this.baseHeight = baseHeight;
+  }
+
+  public getScale(): number {
+    if (this.baseWidth > 0) {
+      const rect = this.container.getBoundingClientRect();
+      if (rect.width > 0) {
+        return rect.width / this.baseWidth;
+      }
+    }
+    if (this.scale > 0) {
+      return this.scale;
+    }
+    const tab = appState.getActiveTab();
+    return tab?.zoom || 1.0;
+  }
+
+  public setTextContent(textContent: any, unscaledViewport: any): void {
+    if (unscaledViewport) {
+      this.baseWidth = unscaledViewport.width;
+      this.baseHeight = unscaledViewport.height;
+    }
+    if (!textContent || !textContent.items) return;
+    const items: ParsedTextItem[] = [];
+    const vpW = unscaledViewport.width;
+    const vpH = unscaledViewport.height;
+
+    for (const item of textContent.items) {
+      if (!item.str || !item.str.trim() || item.width === 0) continue;
+
+      const tx = item.transform[4];
+      const ty = item.transform[5];
+      const w = item.width;
+      const h = item.height || Math.hypot(item.transform[0], item.transform[1]) || 12;
+
+      const c1 = unscaledViewport.convertToViewportPoint(tx, ty);
+      const c2 = unscaledViewport.convertToViewportPoint(tx + w, ty);
+      const c3 = unscaledViewport.convertToViewportPoint(tx + w, ty + h);
+      const c4 = unscaledViewport.convertToViewportPoint(tx, ty + h);
+
+      const xs = [c1[0], c2[0], c3[0], c4[0]];
+      const ys = [c1[1], c2[1], c3[1], c4[1]];
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+
+      const normX = Math.max(0, minX / vpW);
+      const normY = Math.max(0, minY / vpH);
+      const normW = Math.min(1 - normX, (maxX - minX) / vpW);
+      const normH = Math.min(1 - normY, (maxY - minY) / vpH);
+
+      const scaleX = Math.hypot(item.transform[0], item.transform[1]);
+      const scaleY = Math.hypot(item.transform[2], item.transform[3]) || scaleX;
+      const rawFontSize = scaleY > 0 ? scaleY : scaleX;
+      const fontSize = Math.max(8, Math.round(rawFontSize * 10) / 10);
+      const fontName = (item.fontName || '').toLowerCase();
+      let fontFamily = 'sans-serif';
+      if (fontName.includes('serif') || fontName.includes('times')) fontFamily = 'serif';
+      else if (fontName.includes('mono') || fontName.includes('courier')) fontFamily = 'monospace';
+
+      const isBold = fontName.includes('bold') || fontName.includes('black') || fontName.includes('heavy');
+      const isItalic = fontName.includes('italic') || fontName.includes('oblique');
+
+      items.push({
+        str: item.str,
+        x: normX,
+        y: normY,
+        width: normW,
+        height: normH,
+        fontSize,
+        fontFamily,
+        isBold,
+        isItalic,
+      });
+    }
+
+    this.parsedTextItems = items;
+    this.render();
+  }
+
+  public updateDimensions(width: number, height: number, scale?: number): void {
+    if (scale !== undefined && scale > 0) {
+      this.scale = scale;
+    } else if (this.baseWidth > 0 && width > 0) {
+      this.scale = width / this.baseWidth;
+    } else {
+      const tab = appState.getActiveTab();
+      if (tab?.zoom) {
+        this.scale = tab.zoom;
+      }
+    }
     const dpr = window.devicePixelRatio || 1;
     this.interactiveCanvas.width = width * dpr;
     this.interactiveCanvas.height = height * dpr;
@@ -134,11 +246,15 @@ export class AnnotationLayer {
       // Hit test annotations
       const hit = [...pageAnnotations].reverse().find((a) => this.hitTestAnnotation(a, norm));
       if (hit) {
+        if (hit.id === selectedId && hit.type === 'text') {
+          this.editingTextAnnId = hit.id;
+        }
         appState.setSelectedAnnotationId(hit.id);
         this.activeDragAnnotation = hit;
         this.dragMode = 'move';
         this.dragStartNorm = norm;
         this.initialAnnotationState = JSON.parse(JSON.stringify(hit));
+        this.hasDragged = false;
         this.isDrawing = true;
       } else {
         appState.setSelectedAnnotationId(null);
@@ -157,7 +273,48 @@ export class AnnotationLayer {
       return;
     }
 
+    if (tool === 'edit-text') {
+      const pageAnnotations = tab.annotations[this.pageIndex] || [];
+      const textAnnHit = [...pageAnnotations].reverse().find(
+        (a) => a.type === 'text' && this.hitTestAnnotation(a, norm)
+      ) as TextAnnotation | undefined;
+
+      if (textAnnHit) {
+        this.editingTextAnnId = textAnnHit.id;
+        appState.setSelectedAnnotationId(textAnnHit.id);
+        this.render();
+        return;
+      }
+
+      const hit = this.parsedTextItems.find((item) =>
+        norm.x >= item.x - 0.005 &&
+        norm.x <= item.x + item.width + 0.005 &&
+        norm.y >= item.y - 0.005 &&
+        norm.y <= item.y + item.height + 0.005
+      );
+      if (hit) {
+        this.activateExistingTextEdit(hit);
+      } else if (this.editingTextAnnId) {
+        this.editingTextAnnId = null;
+        appState.setSelectedAnnotationId(null);
+        this.render();
+      }
+      return;
+    }
+
     if (tool === 'text') {
+      const pageAnnotations = tab.annotations[this.pageIndex] || [];
+      const textAnnHit = [...pageAnnotations].reverse().find(
+        (a) => a.type === 'text' && this.hitTestAnnotation(a, norm)
+      ) as TextAnnotation | undefined;
+
+      if (textAnnHit) {
+        this.editingTextAnnId = textAnnHit.id;
+        appState.setSelectedAnnotationId(textAnnHit.id);
+        this.render();
+        return;
+      }
+
       this.createTextAnnotationAt(norm);
       return;
     }
@@ -181,6 +338,9 @@ export class AnnotationLayer {
     if (tool === 'select' && this.activeDragAnnotation && this.initialAnnotationState) {
       const dx = norm.x - this.dragStartNorm.x;
       const dy = norm.y - this.dragStartNorm.y;
+      if (Math.hypot(dx, dy) > 0.003) {
+        this.hasDragged = true;
+      }
 
       if (this.dragMode === 'move') {
         const newX = Math.max(0, Math.min(1 - this.activeDragAnnotation.width, this.initialAnnotationState.x + dx));
@@ -276,6 +436,19 @@ export class AnnotationLayer {
       const selectedId = appState.getSelectedAnnotationId();
       if (selectedId) {
         this.deleteAnnotation(selectedId);
+      }
+    } else if (e.key === 'Enter') {
+      const activeTag = document.activeElement?.tagName.toLowerCase();
+      if (activeTag === 'input' || activeTag === 'textarea') return;
+      const selectedId = appState.getSelectedAnnotationId();
+      if (selectedId) {
+        const tab = appState.getActiveTab();
+        const ann = (tab?.annotations[this.pageIndex] || []).find((a) => a.id === selectedId);
+        if (ann && ann.type === 'text') {
+          e.preventDefault();
+          this.editingTextAnnId = ann.id;
+          this.render();
+        }
       }
     }
   }
@@ -382,6 +555,74 @@ export class AnnotationLayer {
     };
 
     this.addAnnotation(ann);
+  }
+
+  public activateExistingTextEdit(item: ParsedTextItem): void {
+    const tab = appState.getActiveTab();
+    if (!tab) return;
+    const pageAnns = tab.annotations[this.pageIndex] || [];
+
+    // Find if an edit annotation already covers this existing text item
+    const existing = pageAnns.find(
+      (a) =>
+        a.type === 'text' &&
+        (a as TextAnnotation).isExistingTextEdit &&
+        ((a as TextAnnotation).originalBounds
+          ? Math.abs((a as TextAnnotation).originalBounds!.x - item.x) < 0.01 &&
+            Math.abs((a as TextAnnotation).originalBounds!.y - item.y) < 0.01
+          : Math.abs(a.x - item.x) < 0.02 && Math.abs(a.y - item.y) < 0.02)
+    ) as TextAnnotation | undefined;
+
+    if (existing) {
+      this.editingTextAnnId = existing.id;
+      appState.setSelectedAnnotationId(existing.id);
+      this.render();
+      return;
+    }
+
+    // Extra width buffer so browser fonts with wider metrics don't wrap onto 2 lines
+    const bufferNorm = Math.max(item.width * 0.20, 0.035);
+    const initialWidth = Math.min(0.98 - item.x, Math.max(item.width + bufferNorm, 0.10));
+    const initialHeight = Math.min(0.98 - item.y, Math.max(item.height * 1.15, 0.028));
+
+    const ann: TextAnnotation = {
+      id: 'edit_txt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      type: 'text',
+      pageIndex: this.pageIndex,
+      x: item.x,
+      y: item.y,
+      width: initialWidth,
+      height: initialHeight,
+      text: item.str,
+      fontSize: item.fontSize,
+      fontFamily: item.fontFamily,
+      color: '#000000',
+      isBold: item.isBold,
+      isItalic: item.isItalic,
+      textAlign: 'left',
+      isExistingTextEdit: true,
+      originalText: item.str,
+      originalBounds: {
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    this.addAnnotation(ann);
+    this.editingTextAnnId = ann.id;
+    appState.setSelectedAnnotationId(ann.id);
+    this.render();
+  }
+
+  private updateSelectionClasses(selectedId: string | null): void {
+    this.htmlOverlay.querySelectorAll('.pdf-text-box-wrapper, .pdf-signature-wrapper').forEach((el) => {
+      const annId = el.getAttribute('data-ann-id');
+      el.classList.toggle('selected', annId === selectedId);
+    });
   }
 
   private createTextAnnotationAt(norm: Point): void {
@@ -536,7 +777,7 @@ export class AnnotationLayer {
 
     this.ctx.save();
     this.ctx.strokeStyle = settings.color;
-    this.ctx.lineWidth = settings.width;
+    this.ctx.lineWidth = settings.width * this.getScale();
     this.ctx.lineCap = 'round';
     this.ctx.lineJoin = 'round';
     this.ctx.globalAlpha = settings.opacity;
@@ -571,7 +812,7 @@ export class AnnotationLayer {
     } else {
       const settings = appState.toolSettings.shape;
       this.ctx.strokeStyle = settings.strokeColor;
-      this.ctx.lineWidth = settings.strokeWidth;
+      this.ctx.lineWidth = settings.strokeWidth * this.getScale();
       this.ctx.globalAlpha = settings.opacity;
 
       if (tool === 'rectangle') {
@@ -592,7 +833,7 @@ export class AnnotationLayer {
 
         if (tool === 'arrow') {
           const angle = Math.atan2(ey - sy, ex - sx);
-          const headLength = Math.max(10, settings.strokeWidth * 3.5);
+          const headLength = Math.max(10, settings.strokeWidth * this.getScale() * 3.5);
           this.ctx.fillStyle = settings.strokeColor;
           this.ctx.beginPath();
           this.ctx.moveTo(ex, ey);
@@ -626,12 +867,21 @@ export class AnnotationLayer {
     const annotations: Annotation[] = tab.annotations[this.pageIndex] || [];
     const selectedId = appState.getSelectedAnnotationId();
     const rect = this.container.getBoundingClientRect();
-    const W = rect.width || 600;
-    const H = rect.height || 800;
+    const scale = this.getScale();
+    const W = rect.width || (this.baseWidth ? this.baseWidth * scale : 600);
+    const H = rect.height || (this.baseHeight ? this.baseHeight * scale : 800);
 
     let svgHtml = '';
     let arrowMarkersHtml = '';
-    this.htmlOverlay.innerHTML = '';
+
+    // Preserve active editing text wrapper if currently in DOM to prevent losing focus/cursor during zoom
+    const activeEditingWrapper = this.editingTextAnnId
+      ? (this.htmlOverlay.querySelector(`.pdf-text-box-wrapper[data-ann-id="${this.editingTextAnnId}"]`) as HTMLElement | null)
+      : null;
+
+    // Remove all children except the active editing wrapper
+    const childrenToRemove = Array.from(this.htmlOverlay.children).filter((el) => el !== activeEditingWrapper);
+    childrenToRemove.forEach((el) => el.remove());
 
     for (const ann of annotations) {
       const isSelected = ann.id === selectedId;
@@ -643,88 +893,255 @@ export class AnnotationLayer {
       if (ann.type === 'text') {
         const t = ann as TextAnnotation;
         const isEditing = this.editingTextAnnId === ann.id;
+        const visualFontSize = Math.max(4, t.fontSize * scale);
+        const padX = t.isExistingTextEdit ? 2 : Math.max(2, Math.round(4 * scale));
+        const padY = t.isExistingTextEdit ? 1 : Math.max(1, Math.round(2 * scale));
+        const lineHeight = 1.25;
 
-        const textWrapper = document.createElement('div');
-        textWrapper.className = `pdf-text-box-wrapper ${isSelected ? 'selected' : ''}`;
-        textWrapper.style.position = 'absolute';
-        textWrapper.style.left = `${x}px`;
-        textWrapper.style.top = `${y}px`;
-        textWrapper.style.width = `${w}px`;
-        textWrapper.style.minHeight = `${h}px`;
-        textWrapper.style.pointerEvents = 'auto';
+        // Measure text to guarantee the container is wide and tall enough to prevent wrapping
+        this.ctx.save();
+        this.ctx.font = `${t.isBold ? 'bold ' : ''}${t.isItalic ? 'italic ' : ''}${visualFontSize}px ${t.fontFamily || 'sans-serif'}`;
+        const lines = (t.text || '').split('\n');
+        let maxLineWidth = 0;
+        for (const line of lines) {
+          const lw = this.ctx.measureText(line).width;
+          if (lw > maxLineWidth) maxLineWidth = lw;
+        }
+        this.ctx.restore();
+
+        // Required pixel width for the text + padding + border (3px) + safety buffer (18px)
+        const requiredPxWidth = maxLineWidth + padX * 2 + 18;
+        const minCoverW = t.isExistingTextEdit && t.originalBounds ? t.originalBounds.width * W : 0;
+        const effectiveW = Math.min(W - x, Math.max(w, requiredPxWidth, minCoverW));
+
+        const requiredPxHeight = Math.max(lines.length * visualFontSize * lineHeight + padY * 2 + 4, visualFontSize * lineHeight);
+        const minCoverH = t.isExistingTextEdit && t.originalBounds ? t.originalBounds.height * H : 0;
+        const effectiveH = Math.min(H - y, Math.max(h, requiredPxHeight, minCoverH));
+
+        if (effectiveW > w) {
+          t.width = effectiveW / W;
+        }
+        if (effectiveH > h) {
+          t.height = effectiveH / H;
+        }
 
         if (isEditing) {
-          const textarea = document.createElement('textarea');
-          textarea.className = 'pdf-text-editor-input';
-          textarea.value = t.text;
-          textarea.style.fontSize = `${t.fontSize}px`;
-          textarea.style.fontFamily = t.fontFamily;
-          textarea.style.color = t.color;
-          textarea.style.fontWeight = t.isBold ? 'bold' : 'normal';
-          textarea.style.fontStyle = t.isItalic ? 'italic' : 'normal';
-          textarea.style.textAlign = t.textAlign;
-          textarea.style.width = '100%';
-          textarea.style.minHeight = `${Math.max(h, 40)}px`;
+          let textWrapper = activeEditingWrapper;
+          let textarea: HTMLTextAreaElement;
 
-          textarea.addEventListener('input', () => {
-            t.text = textarea.value;
-            tab.isDirty = true;
-          });
+          if (textWrapper && textWrapper.querySelector('textarea')) {
+            textarea = textWrapper.querySelector('textarea')!;
+            textWrapper.className = `pdf-text-box-wrapper editing ${t.isExistingTextEdit ? 'existing-text-edit' : ''} ${isSelected ? 'selected' : ''}`;
+            textWrapper.style.position = 'absolute';
+            textWrapper.style.left = `${x}px`;
+            textWrapper.style.top = `${y}px`;
+            textWrapper.style.width = `${effectiveW}px`;
+            textWrapper.style.minHeight = `${effectiveH}px`;
+            textWrapper.style.pointerEvents = 'auto';
 
-          textarea.addEventListener('blur', () => {
-            this.editingTextAnnId = null;
-            this.render();
-            appState.notify();
-          });
-
-          textWrapper.appendChild(textarea);
-          this.htmlOverlay.appendChild(textWrapper);
-
-          setTimeout(() => {
-            textarea.focus();
-            if (textarea.value === 'Type text here...') {
-              textarea.select();
+            textarea.style.fontSize = `${visualFontSize}px`;
+            textarea.style.lineHeight = `${lineHeight}`;
+            textarea.style.fontFamily = t.fontFamily;
+            textarea.style.color = t.color;
+            textarea.style.fontWeight = t.isBold ? 'bold' : 'normal';
+            textarea.style.fontStyle = t.isItalic ? 'italic' : 'normal';
+            textarea.style.textAlign = t.textAlign;
+            textarea.style.padding = `${padY}px ${padX}px`;
+            textarea.style.width = '100%';
+            textarea.style.minHeight = `${effectiveH}px`;
+            if (t.isExistingTextEdit) {
+              textarea.style.whiteSpace = 'pre';
+              textarea.style.wordBreak = 'normal';
+              textarea.style.overflowWrap = 'normal';
             }
-          }, 10);
+          } else {
+            textWrapper = document.createElement('div');
+            textWrapper.className = `pdf-text-box-wrapper editing ${t.isExistingTextEdit ? 'existing-text-edit' : ''} ${isSelected ? 'selected' : ''}`;
+            textWrapper.setAttribute('data-ann-id', ann.id);
+            textWrapper.style.position = 'absolute';
+            textWrapper.style.left = `${x}px`;
+            textWrapper.style.top = `${y}px`;
+            textWrapper.style.width = `${effectiveW}px`;
+            textWrapper.style.minHeight = `${effectiveH}px`;
+            textWrapper.style.pointerEvents = 'auto';
+            if (t.isExistingTextEdit) {
+              textWrapper.style.background = '#ffffff';
+              textWrapper.style.borderRadius = '2px';
+            }
+
+            textarea = document.createElement('textarea');
+            textarea.className = 'pdf-text-editor-input';
+            textarea.value = t.text;
+            textarea.style.fontSize = `${visualFontSize}px`;
+            textarea.style.lineHeight = `${lineHeight}`;
+            textarea.style.fontFamily = t.fontFamily;
+            textarea.style.color = t.color;
+            textarea.style.fontWeight = t.isBold ? 'bold' : 'normal';
+            textarea.style.fontStyle = t.isItalic ? 'italic' : 'normal';
+            textarea.style.textAlign = t.textAlign;
+            textarea.style.padding = `${padY}px ${padX}px`;
+            textarea.style.width = '100%';
+            textarea.style.minHeight = `${effectiveH}px`;
+            if (t.isExistingTextEdit) {
+              textarea.style.whiteSpace = 'pre';
+              textarea.style.wordBreak = 'normal';
+              textarea.style.overflowWrap = 'normal';
+            }
+
+            textarea.addEventListener('input', () => {
+              t.text = textarea.value;
+              tab.isDirty = true;
+
+              this.ctx.save();
+              this.ctx.font = `${t.isBold ? 'bold ' : ''}${t.isItalic ? 'italic ' : ''}${visualFontSize}px ${t.fontFamily || 'sans-serif'}`;
+              const inputLines = (t.text || '').split('\n');
+              let maxInputLineW = 0;
+              for (const l of inputLines) {
+                const lw = this.ctx.measureText(l).width;
+                if (lw > maxInputLineW) maxInputLineW = lw;
+              }
+              this.ctx.restore();
+
+              const neededW = maxInputLineW + padX * 2 + 18;
+              const currentW = textWrapper.offsetWidth;
+              if (neededW > currentW) {
+                const newW = Math.min(W - x, Math.max(neededW, minCoverW));
+                textWrapper.style.width = `${newW}px`;
+                t.width = newW / W;
+              }
+              const neededH = Math.max(effectiveH, inputLines.length * visualFontSize * lineHeight + padY * 2 + 4);
+              if (neededH > textWrapper.offsetHeight) {
+                textWrapper.style.minHeight = `${neededH}px`;
+                t.height = neededH / H;
+              }
+            });
+
+            textarea.addEventListener('keydown', (e: KeyboardEvent) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                textarea.blur();
+              }
+            });
+
+            textarea.addEventListener('blur', () => {
+              if (textWrapper && W > 0 && H > 0) {
+                const actualW = textWrapper.offsetWidth / W;
+                const actualH = textWrapper.offsetHeight / H;
+                if (actualW > t.width) {
+                  t.width = actualW;
+                }
+                if (actualH > t.height) {
+                  t.height = actualH;
+                }
+              }
+              setTimeout(() => {
+                if (this.editingTextAnnId === ann.id) {
+                  this.editingTextAnnId = null;
+                  this.render();
+                  appState.notify();
+                }
+              }, 120);
+            });
+
+            textWrapper.appendChild(textarea);
+            this.htmlOverlay.appendChild(textWrapper);
+
+            setTimeout(() => {
+              textarea.focus();
+              if (textarea.value === 'Type text here...') {
+                textarea.select();
+              } else {
+                const len = textarea.value.length;
+                textarea.setSelectionRange(len, len);
+              }
+            }, 10);
+          }
         } else {
+          const textWrapper = document.createElement('div');
+          textWrapper.className = `pdf-text-box-wrapper ${t.isExistingTextEdit ? 'existing-text-edit' : ''} ${isSelected ? 'selected' : ''}`;
+          textWrapper.setAttribute('data-ann-id', ann.id);
+          textWrapper.style.position = 'absolute';
+          textWrapper.style.left = `${x}px`;
+          textWrapper.style.top = `${y}px`;
+          textWrapper.style.width = `${effectiveW}px`;
+          textWrapper.style.minHeight = `${effectiveH}px`;
+          textWrapper.style.pointerEvents = 'auto';
+          if (t.isExistingTextEdit) {
+            textWrapper.style.background = '#ffffff';
+            textWrapper.style.borderRadius = '2px';
+          }
+
           const textDiv = document.createElement('div');
           textDiv.className = 'pdf-rendered-text-content';
           textDiv.textContent = t.text;
-          textDiv.style.fontSize = `${t.fontSize}px`;
+          textDiv.style.fontSize = `${visualFontSize}px`;
+          textDiv.style.lineHeight = `${lineHeight}`;
           textDiv.style.fontFamily = t.fontFamily;
           textDiv.style.color = t.color;
           textDiv.style.fontWeight = t.isBold ? 'bold' : 'normal';
           textDiv.style.fontStyle = t.isItalic ? 'italic' : 'normal';
           textDiv.style.textAlign = t.textAlign;
+          textDiv.style.padding = `${padY}px ${padX}px`;
           textDiv.style.width = '100%';
           textDiv.style.minHeight = '100%';
+          if (t.isExistingTextEdit) {
+            textDiv.style.whiteSpace = 'pre';
+            textDiv.style.wordBreak = 'normal';
+            textDiv.style.overflowWrap = 'normal';
+          }
 
           textWrapper.appendChild(textDiv);
 
-          // Pointerdown to drag text annotation from anywhere inside
+          // Pointerdown: handles selection, drag start, or direct activation without destroying DOM
           textWrapper.addEventListener('pointerdown', (e: PointerEvent) => {
             if (this.editingTextAnnId === ann.id) return;
+            const tool = appState.getTool();
+
+            // In edit-text or text tool, clicking enters edit mode directly on pointerdown
+            if (tool === 'edit-text' || tool === 'text') {
+              e.stopPropagation();
+              this.editingTextAnnId = ann.id;
+              appState.setSelectedAnnotationId(ann.id);
+              this.render();
+              return;
+            }
+
             e.stopPropagation();
             appState.setSelectedAnnotationId(ann.id);
+            this.updateSelectionClasses(ann.id);
+
             this.activeDragAnnotation = ann;
             this.dragMode = 'move';
             this.dragStartNorm = this.getNormalizedCoords(e);
             this.initialAnnotationState = { ...ann };
+            this.hasDragged = false;
             this.isDrawing = true;
-            this.render();
           });
 
-          // Double click to edit in-place
+          // Single click: if already selected in 'select' tool, or in edit-text/text tool, activate edit mode
+          textWrapper.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (this.hasDragged) return;
+            const tool = appState.getTool();
+            if (tool === 'edit-text' || tool === 'text') {
+              this.editingTextAnnId = ann.id;
+              appState.setSelectedAnnotationId(ann.id);
+              this.render();
+            } else if (tool === 'select') {
+              if (appState.getSelectedAnnotationId() === ann.id) {
+                this.editingTextAnnId = ann.id;
+                this.render();
+              } else {
+                appState.setSelectedAnnotationId(ann.id);
+                this.updateSelectionClasses(ann.id);
+              }
+            }
+          });
+
+          // Double click: always enter edit mode
           textWrapper.addEventListener('dblclick', (e) => {
             e.stopPropagation();
             this.editingTextAnnId = ann.id;
-            appState.setSelectedAnnotationId(ann.id);
-            this.render();
-          });
-
-          // Single click to select
-          textWrapper.addEventListener('click', (e) => {
-            e.stopPropagation();
             appState.setSelectedAnnotationId(ann.id);
             this.render();
           });
@@ -735,6 +1152,7 @@ export class AnnotationLayer {
         const sig = ann as SignatureAnnotation;
         const sigWrapper = document.createElement('div');
         sigWrapper.className = `pdf-signature-wrapper ${isSelected ? 'selected' : ''}`;
+        sigWrapper.setAttribute('data-ann-id', ann.id);
         sigWrapper.style.position = 'absolute';
         sigWrapper.style.left = `${x}px`;
         sigWrapper.style.top = `${y}px`;
@@ -752,22 +1170,23 @@ export class AnnotationLayer {
 
         sigWrapper.appendChild(img);
 
-        // Pointerdown to drag signature from anywhere inside
+        // Pointerdown to drag signature without destroying DOM
         sigWrapper.addEventListener('pointerdown', (e: PointerEvent) => {
           e.stopPropagation();
           appState.setSelectedAnnotationId(ann.id);
+          this.updateSelectionClasses(ann.id);
           this.activeDragAnnotation = ann;
           this.dragMode = 'move';
           this.dragStartNorm = this.getNormalizedCoords(e);
           this.initialAnnotationState = { ...ann };
+          this.hasDragged = false;
           this.isDrawing = true;
-          this.render();
         });
 
         sigWrapper.addEventListener('click', (e) => {
           e.stopPropagation();
           appState.setSelectedAnnotationId(ann.id);
-          this.render();
+          this.updateSelectionClasses(ann.id);
         });
 
         this.htmlOverlay.appendChild(sigWrapper);
@@ -783,7 +1202,7 @@ export class AnnotationLayer {
             <path 
               d="${pathD}" 
               stroke="${p.color}" 
-              stroke-width="${p.strokeWidth}" 
+              stroke-width="${p.strokeWidth * scale}" 
               stroke-linecap="round" 
               stroke-linejoin="round" 
               fill="none" 
@@ -802,7 +1221,7 @@ export class AnnotationLayer {
             width="${w}" 
             height="${h}" 
             stroke="${s.strokeColor}" 
-            stroke-width="${s.strokeWidth}" 
+            stroke-width="${s.strokeWidth * scale}" 
             fill="${s.fillColor || 'transparent'}" 
             opacity="${s.opacity}" 
             data-id="${ann.id}"
@@ -817,7 +1236,7 @@ export class AnnotationLayer {
             rx="${w / 2}" 
             ry="${h / 2}" 
             stroke="${s.strokeColor}" 
-            stroke-width="${s.strokeWidth}" 
+            stroke-width="${s.strokeWidth * scale}" 
             fill="${s.fillColor || 'transparent'}" 
             opacity="${s.opacity}" 
             data-id="${ann.id}"
@@ -842,9 +1261,11 @@ export class AnnotationLayer {
         const markerAttr = ann.type === 'arrow' ? `marker-end="url(#${markerId})"` : '';
 
         if (ann.type === 'arrow') {
+          const markerWidth = 8 * scale;
+          const markerHeight = 6 * scale;
           arrowMarkersHtml += `
-            <marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 0 L 8 3 L 0 6 z" fill="${s.strokeColor}" />
+            <marker id="${markerId}" markerWidth="${markerWidth}" markerHeight="${markerHeight}" refX="${7 * scale}" refY="${3 * scale}" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M 0 0 L ${markerWidth} ${markerHeight / 2} L 0 ${markerHeight} z" fill="${s.strokeColor}" />
             </marker>
           `;
         }
@@ -856,7 +1277,7 @@ export class AnnotationLayer {
             x2="${x2}" 
             y2="${y2}" 
             stroke="${s.strokeColor}" 
-            stroke-width="${s.strokeWidth}" 
+            stroke-width="${s.strokeWidth * scale}" 
             opacity="${s.opacity}" 
             ${markerAttr}
             data-id="${ann.id}"
@@ -866,10 +1287,10 @@ export class AnnotationLayer {
         const st = ann as StampAnnotation;
         svgHtml += `
           <g class="stamp-ann" data-id="${ann.id}">
-            <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="#ffffff" fill-opacity="0.95" stroke="${st.color}" stroke-width="2.5" />
-            <rect x="${x + 3}" y="${y + 3}" width="${w - 6}" height="${h - 6}" rx="4" fill="none" stroke="${st.color}" stroke-width="1" />
-            <text x="${x + w / 2}" y="${y + h / 2 + (st.dateStr ? -2 : 6)}" font-family="Segoe UI, Inter, sans-serif" font-weight="900" font-size="${Math.min(h * 0.42, 16)}" fill="${st.color}" text-anchor="middle" dominant-baseline="middle">${st.label}</text>
-            ${st.dateStr ? `<text x="${x + w / 2}" y="${y + h - 8}" font-family="Segoe UI, Inter, sans-serif" font-weight="bold" font-size="9" fill="${st.color}" text-anchor="middle">${st.dateStr}</text>` : ''}
+            <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${6 * scale}" fill="#ffffff" fill-opacity="0.95" stroke="${st.color}" stroke-width="${2.5 * scale}" />
+            <rect x="${x + 3 * scale}" y="${y + 3 * scale}" width="${w - 6 * scale}" height="${h - 6 * scale}" rx="${4 * scale}" fill="none" stroke="${st.color}" stroke-width="${1 * scale}" />
+            <text x="${x + w / 2}" y="${y + h / 2 + (st.dateStr ? -2 * scale : 6 * scale)}" font-family="Segoe UI, Inter, sans-serif" font-weight="900" font-size="${Math.min(h * 0.42, 16 * scale)}" fill="${st.color}" text-anchor="middle" dominant-baseline="middle">${st.label}</text>
+            ${st.dateStr ? `<text x="${x + w / 2}" y="${y + h - 8 * scale}" font-family="Segoe UI, Inter, sans-serif" font-weight="bold" font-size="${9 * scale}" fill="${st.color}" text-anchor="middle">${st.dateStr}</text>` : ''}
           </g>
         `;
       } else if (ann.type === 'redaction') {
@@ -883,6 +1304,46 @@ export class AnnotationLayer {
       if (isSelected) {
         svgHtml += this.renderSelectionBox(x, y, w, h);
       }
+    }
+
+    if (activeEditingWrapper && !annotations.some((a) => a.id === this.editingTextAnnId)) {
+      activeEditingWrapper.remove();
+    }
+
+    if (appState.getTool() === 'edit-text' && this.parsedTextItems.length > 0) {
+      const activeTab = appState.getActiveTab();
+      const pageAnns = (activeTab?.annotations[this.pageIndex] || []) as TextAnnotation[];
+      const activeEdits = pageAnns.filter((a) => a.type === 'text' && a.isExistingTextEdit);
+
+      const overlay = document.createElement('div');
+      overlay.className = 'pdf-existing-text-overlay';
+
+      for (const item of this.parsedTextItems) {
+        // Skip rendering hover item if already replaced by an active edit annotation
+        const isReplaced = activeEdits.some(
+          (a) =>
+            a.originalBounds
+              ? Math.abs(a.originalBounds.x - item.x) < 0.01 && Math.abs(a.originalBounds.y - item.y) < 0.01
+              : Math.abs(a.x - item.x) < 0.02 && Math.abs(a.y - item.y) < 0.02
+        );
+        if (isReplaced) continue;
+
+        const el = document.createElement('div');
+        el.className = 'pdf-existing-text-item';
+        el.style.left = `${item.x * W}px`;
+        el.style.top = `${item.y * H}px`;
+        el.style.width = `${item.width * W}px`;
+        el.style.height = `${item.height * H}px`;
+        el.title = `Click to edit: "${item.str}"`;
+
+        el.addEventListener('pointerdown', (e) => {
+          e.stopPropagation();
+          this.activateExistingTextEdit(item);
+        });
+
+        overlay.appendChild(el);
+      }
+      this.htmlOverlay.appendChild(overlay);
     }
 
     const defs = `<defs>${arrowMarkersHtml}</defs>`;

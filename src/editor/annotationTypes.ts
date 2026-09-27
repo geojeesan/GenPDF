@@ -34,6 +34,15 @@ export interface TextAnnotation extends BaseAnnotation {
   isBold: boolean;
   isItalic: boolean;
   textAlign: 'left' | 'center' | 'right';
+  // If editing existing text embedded in the PDF:
+  isExistingTextEdit?: boolean;
+  originalText?: string;
+  originalBounds?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
 export interface Point {
@@ -97,6 +106,7 @@ export type Annotation =
 export type ToolType = 
   | 'select' 
   | 'hand' 
+  | 'edit-text'
   | 'text' 
   | 'pen' 
   | 'highlight' 

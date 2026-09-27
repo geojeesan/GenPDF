@@ -278,7 +278,7 @@ export class ViewportManager {
       pageItem.element.style.height = `${h}px`;
       pageItem.canvas.style.width = `${w}px`;
       pageItem.canvas.style.height = `${h}px`;
-      pageItem.annotationLayer.updateDimensions(w, h);
+      pageItem.annotationLayer.updateDimensions(w, h, scale);
     });
 
     if (!isPinch) {
@@ -380,8 +380,8 @@ export class ViewportManager {
       canvas.style.backgroundColor = '#ffffff';
       pageContainer.appendChild(canvas);
 
-      const annotationLayer = new AnnotationLayer(pageIndex, pageContainer);
-      annotationLayer.updateDimensions(baseWidth * this.currentScale, baseHeight * this.currentScale);
+      const annotationLayer = new AnnotationLayer(pageIndex, pageContainer, baseWidth, baseHeight);
+      annotationLayer.updateDimensions(baseWidth * this.currentScale, baseHeight * this.currentScale, this.currentScale);
 
       this.pagesWrapper.appendChild(pageContainer);
 
@@ -426,6 +426,18 @@ export class ViewportManager {
     );
 
     item.rendered = true;
+
+    // Extract text content for existing text editing
+    try {
+      const pageProxy = await tab.pdfDoc.getPage(item.pageIndex + 1);
+      const textContent = await pageProxy.getTextContent({ disableNormalization: false });
+      const totalRotation = (pageProxy.rotate + userRotation) % 360;
+      const unscaledViewport = pageProxy.getViewport({ scale: 1.0, rotation: totalRotation });
+      item.annotationLayer.setTextContent(textContent, unscaledViewport);
+    } catch (e) {
+      console.warn('Could not extract text content for page', item.pageIndex + 1, e);
+    }
+
     item.annotationLayer.render();
   }
 
